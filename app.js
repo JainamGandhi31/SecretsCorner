@@ -87,17 +87,22 @@ app.get("/login",(req,res)=>{
 })
 
 app.get("/secrets",(req,res)=>{
-    // anybody who is logged in or not logged in should be abble to see the secrets
-    User.find({secret:{$ne: null}},(err,foundUsers)=>{
-        if(err){
-            console.log(err);
-        }
-        else{
-            if(foundUsers){
-                res.render("secrets",{usersWithSecrets: foundUsers});
+
+    if(req.isAuthenticated()){
+        User.find({secret:{$ne: null}},(err,foundUsers)=>{
+            if(err){
+                console.log(err);
             }
-        }
-    });
+            else{
+                if(foundUsers){
+                    res.render("secrets",{usersWithSecrets: foundUsers});
+                }
+            }
+        });
+    }
+    else{
+        res.redirect("/login");
+    }
 })
 
 app.get("/register",(req,res)=>{
