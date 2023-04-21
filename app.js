@@ -3,26 +3,46 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const bcrypt = require("bcrypt");
-const { resolveEndpoint } = require("@aws-sdk/util-endpoints");
-const saltRounds = 10; // the more this number is, the harder it will be for the computer to generate the hash
+
+// requiring packages for session
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+const { rsort } = require("semver");
 
 const app = express();
 
+app.use(bodyParser.urlencoded({extended: true}));
 app.use(express.static("public"));
 app.set("view engine","ejs");
-app.use(bodyParser.urlencoded({extended: true}));
 
+// setting up the session
+app.use(session({
+    secret: "ThisIsNotASecret",
+    resave: false,
+    saveUninitialized: false
+}))
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+mongoose.set("strictQuery", false);
 mongoose.connect("mongodb://localhost:27017/userDB");
 
 const userSchema = new mongoose.Schema({
-    email: String,
+    username: String,
     password: String
 });
 
+// adding passportLocalMongoose as a plugin to user schema
+userSchema.plugin(passportLocalMongoose); 
 
+const User = mongoose.model("User",userSchema); //model with passport-local-mongoose plugged in
 
-const User = mongoose.model("User",userSchema);
+passport.use(User.createStrategy());
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
 app.get("/",(req,res)=>{
     res.render("home");
 })
@@ -31,56 +51,61 @@ app.get("/login",(req,res)=>{
     res.render("login");
 })
 
+app.get("/secrets",(req,res)=>{
+    if(req.isAuthenticated()){
+        res.render("secrets");
+    }
+    else{
+        res.redirect("/login");
+    }
+})
+
 app.get("/register",(req,res)=>{
     res.render("register");
 })
 
 app.post("/register",(req,res)=>{
-
-    bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
-        if(!err){
-            const newUser = new User({
-                email: req.body.username,
-                password: hash
-            })
-        
-            newUser.save((err)=>{
-                if(!err){
-                    res.render("secrets");
-                }
-                else{
-                    res.send(err);
-                }
+    User.register({username: req.body.username}, req.body.password, (err,user)=>{
+        if(err){
+            console.log("error registering the user");
+            console.log(err);
+            res.redirect("/register")
+        }
+        else{
+            // Because we are authenticating our user and setting up a logged in session for them then even if they just go directly to the secrets page then they should automatically able to view it if they are still logged in
+            passport.authenticate("local")(req,res,function(){
+                res.redirect("/secrets");
             })
         }
-    });
+    })
 })
 
 
 app.post("/login",(req,res)=>{
-    const username = req.body.username;
-    const password = req.body.password;
+    const user = new User({
+        username: req.body.username,
+        password: req.body.password
+    })
 
-    User.findOne({email: username}).exec((err,foundUser)=>{
-       if(err){
-        res.send(err);
-       }
-       else{
-        if(foundUser){
-            bcrypt.compare(password, foundUser.password, function(error, result) {
-                if(result === true){
-                    res.render("secrets");
-                }
-                else{
-                    res.send(error);
-                }
-            });
+    req.login(user,(err)=>{
+        if(err){
+            console.log(err);
         }
-       }
+        else{
+            passport.authenticate("local")(req,res,function(){
+                res.redirect("/secrets");
+            })
+        }
     })
 })
 
 app.get("/logout",(req,res)=>{
+    // when user logs out we have to deauthenticate the user and end his session
+    req.logout((err)=>{
+        if(err){
+            console.log(err);
+        }
+    });
     res.redirect("/");
 })
 
